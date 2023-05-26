@@ -164,8 +164,9 @@ contract periodicRewardsInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
                 balance >= target.amountPerPeriod &&
                 target.periodNumber < target.maxPeriods
             ) {
-                    // should i change balance to amountPerPeriod
-                    token.approve(gaugeList[idx], balance);
+
+                    SafeERC20.safeApprove(token,gaugeList[idx],target.amountPerPeriod);
+
                     try gauge.deposit_reward_token(address(token), uint256(target.amountPerPeriod)) {
                         s_targets[ready[idx]].lastInjectionTimeStamp = uint56(block.timestamp);
                         s_targets[ready[idx]].periodNumber += 1;
@@ -250,7 +251,7 @@ contract periodicRewardsInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
     function manualDeposit(address gauge, address reward_token, uint256 amount) external onlyOwner {
         IChildChainGauge gaugeContract = IChildChainGauge(gauge);
         IERC20 token = IERC20(reward_token);
-        token.approve(gauge, amount);
+        SafeERC20.safeApprove(token,gauge,amount);
         gaugeContract.deposit_reward_token(reward_token, amount);
         emit emissionsInjection(gauge,amount);
     }
@@ -298,6 +299,7 @@ contract periodicRewardsInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
     function setInjectTokenAddress(address ERC20token) public onlyOwner {
         emit setHandlingToken(ERC20token);
         s_injectTokenAddress = ERC20token;
+
     }
     /**
      * @notice Gets the token this injector is operating on

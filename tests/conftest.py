@@ -4,7 +4,6 @@ from brownie import (
     interface,
     accounts,
     periodicRewardsInjector,
-    testToken,
     Contract
 
 )
