@@ -3,7 +3,7 @@ import time
 from brownie import (
     interface,
     accounts,
-    periodicRewardsInjector,
+    ChildChainGaugeInjector,
     Contract
 
 )
@@ -20,7 +20,6 @@ ARBI_LDO_WHALE = "0x8565faab405b06936014c8b6bd5ab60376cc051b"
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 ARBI_LDO_ADDRESS = "0xC3C7d422809852031b44ab29EEC9F1EfF2A58756"
 WEEKLY_INCENTIVE = 200*10**18
-STREAMER_STUCK = 6003155 ## Something that seems stuck in the streamer LDO
 LM_MULTISIG ="0xc38c5f97B34E175FFd35407fc91a937300E33860"
 ## weth, usdt, usdc
 TOKEN_LIST = [

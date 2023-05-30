@@ -2,7 +2,7 @@ from brownie import (
     interface,
     accounts,
     chain,
-    periodicRewardsInjector,
+    ChildChainGaugeInjector,
 )
 
 
@@ -24,9 +24,9 @@ LINK_BY_CHAIN = {
 }
 
 
-injector = periodicRewardsInjector.deploy(
+injector = ChildChainGaugeInjector.deploy(
     REGISTRY_BY_CHAIN[chain.id],
-    60 * 60 * 7,  # minWaitPeriodSeconds is 1 week
+    60 * 60 * 6,  # minWaitPeriodSeconds is 6 days
     TOKEN_ADDRESS,
     {"from": account},
     publish_source=True

@@ -201,11 +201,11 @@ def test_sweep(admin, injector, token, deployer):
     assert token.balanceOf(admin) > 0
     token.transfer(injector, token.balanceOf(admin), {"from": admin})
     assert token.balanceOf(admin) == 0
-    injector.sweep(token, admin, {"from": admin})
+    injector.sweep(token, {"from": admin})
     assert token.balanceOf(admin) >= admin_balance
     assert token.balanceOf(admin) + token.balanceOf(injector) == system_balance
     with brownie.reverts("Only callable by owner"):
-        injector.sweep(deployer, injector, {"from": deployer})
+        injector.sweep(token, {"from": deployer})
 
 def test_sweep_multitoken(admin, injector, token, deployer, token_list):
     for test_token in token_list:
@@ -215,12 +215,11 @@ def test_sweep_multitoken(admin, injector, token, deployer, token_list):
         assert tok.balanceOf(admin) > 0
         tok.transfer(injector, tok.balanceOf(admin), {"from": admin})
         assert tok.balanceOf(admin) == 0
-        injector.sweep(tok, admin, {"from": admin})
+        injector.sweep(tok, {"from": admin})
         assert tok.balanceOf(admin) >= admin_balance
         assert tok.balanceOf(admin) + tok.balanceOf(injector) == system_balance
-
-    with brownie.reverts("Only callable by owner"):
-        injector.sweep(deployer, injector, {"from": deployer})
+        with brownie.reverts("Only callable by owner"):
+            injector.sweep(token, {"from": deployer})
 
 def test_setDistributorToOwner(admin, injector, gauge, token, deployer, token_list):
     assert(gauge.reward_data(token.address)[0] == injector.address)
