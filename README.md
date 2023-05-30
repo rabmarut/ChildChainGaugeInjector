@@ -1,39 +1,75 @@
 # periodicRewardsInjector
 
 ## Intro
-This periodic rewards injector is designed to allow DAOs on non-mainnet chains to easily add rewards to a Balancer gauge
-through the childChainStreamer.  It is meant to be deployed for a single ERC20 reward token.
+The ChildChainGaugeInjector is designed to manage weekly injections of non-bal tokens into  Child Chain layer zero gauges based on a predefined keeper using chainlink keepers.
+It is meant to be deployed for a single ERC20 reward token, but can manage any number of gauges for that token.
 
 It allows the configured admin to define a list of schedules, and then can be operated by [Chainlink Automation](https://automation.chain.link/).
 
-### The childChainStreamer runs on weekly epochs:
+Methods exist to define new schedules either without validation (overwrite whatever is there), and with validation (ensure current schedules are finished and there is the correct balance to complete the proposed schedule).
 
-- If a current epoch with rewards is running, only the specified distributor may alter the schedule.  
-- If no reward epoch is running, any address may send rewards and call a notify command to start a new epoch.
+The contract also includes functionality for the owner to sweep ERC20 tokens and gas tokens in order to allow the contract to be easily decommissioned should there be any issues or it is no longer needed.
 
-This contract is intended to operate as an unpermissioned caller.  It waits until an epoch has ended, and then pays in the specified amount and calls notify.
+
+### The Child Chain Gauge runs on weekly epochs:
+
+- Only the defined distributor for a given token may inject rewards.  
+- The injector uses changes to period_finish on the gauge contract to understand epochs and runs once per epoch as early as possible.
+
+This contract is intended to operate as the distributor, and has functionality to return distributorship to the owner
 
 ### The watchlist
 
-The injector runs using a watch list.  The watch list is defined as the tuple of [streamerAddress, amount, maxTopups].
+The injector runs using a watch list.  The watch list is defined as the tuple of [gaugeAddress, amount, maxTopups].
 
 For every streamer address, assuming a sufficent token balance, the injector will top up the specified amounts until it has done so maxTopups time.
 
-This list is defined by calling the `function setRecipientList(streamerAddresses, amountsPerPeriod, maxPeriods)` on the deployed injector.
+List changes are atomic.  A new list replaces an old once.
+
+This list is defined by calling the function `setRecipientList(streamerAddresses, amountsPerPeriod, maxPeriods)` on the deployed injector.
+
+`setValidatedRecipientList(streamerAddresses, amountsPerPeriod, maxPeriods)` can also be called.  It checks that there are running programs that still have periods to pay out, and that the balance in the injector contract is exactly the amount required to pay the full new program.  It will revert if these conditions are not met, and set a new list if they are. 
+
+
+### Balances
+The injector uses ERC20 balances in the injector contract to pay rewards.  The upkeeps will not run if there is not enough tokens in the contract to satisfy all currently due injections.
+
+The following usage pattern can be followed to maintain proper balances at all times:
+
+#### When setting schedule
+- Use `setValidatedRecipientList(streamerAddresses, amountsPerPeriod, maxPeriods)`
+- Transfer the exact amount required for the entire program (all streams, all amounts, all periods)
+- Do not load the next schedule until the current one is complete.
+
+#### To abort a schedule midway through or reset
+- Use `setRecipientList([], [], [])` to clear the list.
+- Use `sweep(token)` to transfer any remaining tokens back to the owner.
+- Now you can use the normal process to set a new schedule.
 
 ## Deployment and operations
 
 ### Dependancies/environment setup
 This repo requires eth-brownie to work.  Both versions 1.17 and 1.19 have been tested.  The contracts were developed using python3.9 and brownie 1.19.
 
-On a mac with homebrew from the root of this repo:
+On a mac with homebrew from the root of this repo run the following commands to install brownie and run the tests:
 ```bash
+export WEB3_INFURA_PROJECT_ID=<your infura key>
+export ETHERSCAN_TOKEN=<your etherscan API token> 
 brew install python@3.9
 python3.9 -m venv venv
 source venv/bin/activate
-pip3 install brownie==1.19.0
-brownie --version
+pip3 install -r requirements.txt
+brownie test
 ```
+Note that ETHERSCAN_TOKEN can be changed to whatever network you are operating on, for example:
+
+ - POLYGONSCAN_TOKEN
+ - OPTIMISMSCAN_TOKEN
+ - ABRISCAN_TOKEN
+ - ZKEVMSCAN_TOKEN
+ - GNOSISSCAN_TOKEN
+
+Note that this installs a version of brownie 1.19.3 modified/maintained by tritium to include the extra chains Balancer operates on. 
 
 You will need to have an account setup in brownie with gas.  You can read more about brownie accounts [here](https://eth-brownie.readthedocs.io/en/v1.19.0/core-accounts.html).
 
@@ -53,7 +89,7 @@ Deployment is done using the deploy script found in [scripts/deploy.py](scripts/
 - Ensure that the correct contract address for the chain you are deploying too exists in LINK_BY_CHAIN
 - Ensure the correct chainlink registry address for the cain you are deploying to exists in REGISTRY_BY_CHAIN. [Chainlink Docs])(https://docs.chain.link/chainlink-automation/supported-networks/#configurations)
 
-Once everthing looks good run `brownie run --network <network name> scripts/deploy.py`. 
+Once everything looks good run `brownie run --network <network name> scripts/deploy.py`. 
 
 The list of all available network names can be found by running `brownie network list`.
 In general you will want to use one of `[arbitrum-main, polygon-main, optimism-main]`
@@ -97,7 +133,7 @@ Similar to the steps above, to generate a watch list use the following in `brown
 
 ```python
 from scripts.configure import set_recipient_list
-set_recipient_list(streamer_addresses=["",""], 
+set_recipient_list(gauge_addresses=["",""], 
                    amounts_per_period=[1,2], 
                    max_periods=[3,3], 
                    injector_address="", 

@@ -203,12 +203,12 @@ def register_upkeep(upkeep_contract,
     return json.dumps(payload)
 
 
-def set_recipient_list(streamer_addresses, amounts_per_period, max_periods, injector_address, safe_address, token_address, chain_id=chain.id):
+def set_recipient_list(gauge_addresses, amounts_per_period, max_periods, injector_address, safe_address, token_address, chain_id=chain.id):
     payload = json.loads(CONF_WATCHLIST_TEMPLATE)
     payload["chainId"] = chain_id
     payload["meta"]["createdFromSafeAddress"] = safe_address
     payload["transactions"][0]["to"] = injector_address
-    payload["transactions"][0]["contractInputsValues"]["gaugeAddresses"] = streamer_addresses
+    payload["transactions"][0]["contractInputsValues"]["gaugeAddresses"] = gauge_addresses
     payload["transactions"][0]["contractInputsValues"]["amountsPerPeriod"] = amounts_per_period
     payload["transactions"][0]["contractInputsValues"]["maxPeriods"] = max_periods
     ### Send coins

@@ -11,13 +11,19 @@ import "interfaces/balancer/IChildChainGauge.sol";
 
 
 /**
- * @title The PeriodicRewardsInjector Contract
- * @author tritium.eth
- * @notice Modification of the Chainlink's EthBalanceMonitor to send ERC20s to a rewards gauge on a regular basis
- * @notice The contract includes the ability to withdraw eth and sweep all ERC20 tokens including the managed token to any address by the owner
+ * @title The ChildChainGaugeInjector Contract
+ * @author 0xtritium.eth + master coder Mike B
+ * @notice This contract is a chainlink automation compatible interface to automate regular payment of non-BAL rewards to a child chain gauge.
+ * @notice This contract is meant to run/manage a single token.  This is almost always the case for a DAO trying to use such a thing.
+ * @notice The configuration is rewritten each time it is loaded.
+ * @notice This contract will only function if it is configured as the distributor for a token/gauge it is operating on.
+ * @notice The contract is meant to hold token balances, and works on a schedule set using setRecipientList.  The schedule defines an amount per round and number of rounds per gauge.
+ * @notice This contract is Ownable and has lots of sweep functionality to allow the owner to work with the contract or get tokens out should there be a problem.
  * see https://docs.chain.link/chainlink-automation/utility-contracts/
  */
-contract periodicRewardsInjector is ConfirmedOwner, Pausable, KeeperCompatibleInterface {
+
+
+contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleInterface {
     event gasTokenWithdrawn(uint256 amountWithdrawn, address recipient);
     event KeeperRegistryAddressUpdated(address oldAddress, address newAddress);
     event MinWaitPeriodUpdated(uint256 oldMinWaitPeriod, uint256 newMinWaitPeriod);
@@ -105,6 +111,7 @@ contract periodicRewardsInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
 
     /**
      * @notice Gets a list of addresses that are ready to inject
+     * @notice This is done by checking if the current period has ended, and should inject new funds directly after the end of each period.
    * @return list of addresses that are ready to inject
    */
     function getReadyGauges() public view returns (address[] memory) {
@@ -181,7 +188,9 @@ contract periodicRewardsInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
 
     /**
      * @notice Get list of addresses that are ready for new token injections and return keeper-compatible payload
-   * @return upkeepNeeded signals if upkeep is needed, performData is an abi encoded list of addresses that need funds
+   * @param performData required by the chainlink interface but not used in this case.
+   * @return upkeepNeeded signals if upkeep is needed
+   * @return performData is an abi encoded list of addresses that need funds
    */
     function checkUpkeep(bytes calldata)
     external
@@ -209,25 +218,24 @@ contract periodicRewardsInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
     /**
      * @notice Withdraws the contract balance
    * @param amount The amount of eth (in wei) to withdraw
-   * @param recipient The address to pay
    */
-    function withdrawGasToken(uint256 amount, address payable recipient) external onlyOwner {
+    function withdrawGasToken(uint256 amount) external onlyOwner {
+        address payable recipient = payable(owner());
         if (recipient == address(0)) {
             revert ZeroAddress();
         }
-        emit gasTokenWithdrawn(amount, recipient);
+        emit gasTokenWithdrawn(amount, owner());
         recipient.transfer(amount);
     }
 
     /**
      * @notice Sweep the full contract's balance for a given ERC-20 token
    * @param token The ERC-20 token which needs to be swept
-   * @param recipient The address to pay
    */
-    function sweep(address token, address recipient) external onlyOwner {
+    function sweep(address token) external onlyOwner {
         uint256 balance = IERC20(token).balanceOf(address(this));
-        emit ERC20Swept(token, recipient, balance);
-        SafeERC20.safeTransfer(IERC20(token), recipient, balance);
+        emit ERC20Swept(token, owner(), balance);
+        SafeERC20.safeTransfer(IERC20(token), owner(), balance);
     }
 
     /**
