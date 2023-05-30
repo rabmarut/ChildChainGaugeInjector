@@ -14,6 +14,7 @@ import pytest
 ##  Accounts
 ## addresses are for polygon
 STREAMER_ADDRESS = "0x3Eae4a1c2E36870A006E816930d9f55DF0a72a13"
+STREAMER_ADDRESS2 = "0xc7e5FE004416A96Cb2C7D6440c28aE92262f7695"
 STREAMER_OWNER_ADDRESS = "0xAB093cd16e765b5B23D34030aaFaF026558e0A19" ## authorizer-adaptor
 ARBI_WSTETH_USDC_WHALE = "0x3bAbEBfD684506A5B47701ee231A53427Ad413Ef"
 ARBI_LDO_WHALE = "0x8565faab405b06936014c8b6bd5ab60376cc051b"
@@ -33,7 +34,6 @@ TOKEN_LIST = [
 def get_rewards():
     return "0x1afe22a6"  # get_rewards has function selector "0x1afe22a6"
 
-
 @pytest.fixture(scope="module")
 def admin():
     return ARBI_LDO_WHALE
@@ -48,6 +48,10 @@ def whale():
 @pytest.fixture(scope="module")
 def gauge():
     return Contract(STREAMER_ADDRESS)
+
+@pytest.fixture(scope="module")
+def gauge2():
+    return Contract(STREAMER_ADDRESS2)
 
 @pytest.fixture(scope="module")
 def authorizer_adaptor():
@@ -88,14 +92,14 @@ def token_list():
     return TOKEN_LIST
 
 @pytest.fixture(scope="module")
-def deploy(deployer, admin, upkeep_caller, authorizer_adaptor, streamer, gauge, get_rewards, token, authorizer_entrypoint,token_list):
+def deploy(deployer, admin, upkeep_caller, authorizer_adaptor, streamer, gauge, gauge2, get_rewards, token, authorizer_entrypoint,token_list):
     """
     Deploys, vault and test strategy, mock token and wires them up.
     """
 
     # token.transfer(admin, 10000*10**18, {"from": ARBI_LDO_WHALE})
 
-    injector = periodicRewardsInjector.deploy(
+    injector = ChildChainGaugeInjector.deploy(
         upkeep_caller,
         60*5, #minWaitPeriodSeconds
         token.address,
@@ -104,8 +108,17 @@ def deploy(deployer, admin, upkeep_caller, authorizer_adaptor, streamer, gauge, 
     print(token.balanceOf(deployer))
     injector.transferOwnership(admin, {"from": deployer})
     injector.acceptOwnership({"from": admin})
+
+
     calldata = gauge.add_reward.encode_input(ARBI_LDO_ADDRESS,injector.address)
-    authorizer_entrypoint.performAction(gauge.address,calldata,{'from':LM_MULTISIG})
+    try:
+        authorizer_entrypoint.performAction(gauge.address,calldata,{'from':LM_MULTISIG})
+        authorizer_entrypoint.performAction(gauge2.address, calldata, {'from': LM_MULTISIG})
+    except:
+        print("token already added")
+
+    # calldata2 = gauge2.add_reward.encode_input(ARBI_LDO_ADDRESS,injector.address)
+    # authorizer_entrypoint.performAction(gauge2.address, calldata, {'from': LM_MULTISIG})
 
     token.transfer(admin,1000*10**18,{'from':ARBI_LDO_WHALE})
 
