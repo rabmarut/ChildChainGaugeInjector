@@ -232,3 +232,37 @@ def test_manualDeposit(admin, injector, gauge, token, deployer, token_list):
     token.transfer(injector.address, 1000 * 10 ** 18, {'from': admin})
     injector.manualDeposit(gauge.address,token.address,amount,{'from':injector.owner()})
     assert(gauge.reward_data(token.address)[3] == chain.time() )
+
+def test_validatedSuccess(admin, injector, gauge, token, gauge2):
+
+    # throw all current tokens away
+    token.transfer(token.address,token.balanceOf(injector.address),{'from':injector.address})
+    assert(token.balanceOf(injector) == 0)
+    token.transfer(injector.address, 950 * 10 ** 18, {'from': admin})
+
+    injector.setRecipientList([], [], [], {'from': admin})
+    injector.setValidatedRecipientList([gauge,gauge2],[50*10**18,150*10**18],[4,5],{'from':admin})
+    assert injector.checkBalancesMatch()
+    injector.injectFunds([gauge,gauge2])
+    # sleep 8 days
+    chain.sleep(60*60*24*8)
+    chain.mine()
+    injector.injectFunds([gauge, gauge2])
+    assert injector.checkBalancesMatch()
+
+# tests to make sure checkUpkeepBalance (which gets called on setValidatedRecipient)
+# returns false when sum of scheduled distributions don't add up to current balance
+def test_validatedFail(admin, injector, gauge, token, gauge2):
+    # throw all current tokens away
+    token.transfer(token.address,token.balanceOf(injector.address),{'from':injector.address})
+    assert(token.balanceOf(injector) == 0)
+    # Note: amount is changed to 1000, but total sum needed is 950
+    token.transfer(injector.address, 1000 * 10 ** 18, {'from': admin})
+
+    injector.setRecipientList([], [], [], {'from': admin})
+
+    with brownie.reverts("balances don't match"):
+        injector.setValidatedRecipientList([gauge, gauge2], [50 * 10 ** 18, 150 * 10 ** 18], [4, 5], {'from': admin})
+
+    injector.setRecipientList([gauge, gauge2], [50 * 10 ** 18, 150 * 10 ** 18], [4, 5], {'from': admin})
+    assert injector.checkBalancesMatch() == False

@@ -70,6 +70,8 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         setInjectTokenAddress(injectTokenAddress);
     }
 
+
+
     /**
      * @notice Sets the list of addresses to watch and their funding parameters
    * @param gaugeAddresses the list of addresses to watch
@@ -80,7 +82,7 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         address[] calldata gaugeAddresses,
         uint256[] calldata amountsPerPeriod,
         uint8[] calldata maxPeriods
-    ) external onlyOwner {
+    ) public onlyOwner {
         if (gaugeAddresses.length != amountsPerPeriod.length || gaugeAddresses.length != maxPeriods.length) {
             revert InvalidGaugeList();
         }
@@ -109,6 +111,41 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         s_gaugeList = gaugeAddresses;
     }
 
+
+    function setValidatedRecipientList(address[] calldata gaugeAddresses,
+        uint256[] calldata amountsPerPeriod,
+        uint8[] calldata maxPeriods
+    ) external onlyOwner {
+        address[] memory gaugeList = s_gaugeList;
+        // validate all periods are finished
+        for (uint256 idx = 0; idx < gaugeList.length; idx++) {
+            Target memory target = s_targets[gaugeList[idx]];
+            if (target.periodNumber <= target.maxPeriods) {
+                revert("periods not finished");
+            }
+        }
+        setRecipientList(gaugeAddresses, amountsPerPeriod, maxPeriods);
+
+        if (!checkBalancesMatch()) {
+            revert("balances don't match");
+        }
+
+    }
+
+    function checkBalancesMatch() public view returns (bool){
+        // iterates through all gauges to make sure theres enough tokens in the contract to fulfill all scheduled tasks
+        // go through all gauges to see how many tokens are needed
+        // maxperiods - periodnumber * amountPerPeriod ==  token.balanceOf(address(this))
+
+        address[] memory gaugeList = s_gaugeList;
+        uint256 totalDue;
+        for (uint256 idx = 0; idx < gaugeList.length; idx++) {
+            Target memory target = s_targets[gaugeList[idx]];
+            totalDue = totalDue + (target.maxPeriods - target.periodNumber) * target.amountPerPeriod;
+        }
+        return totalDue == IERC20(s_injectTokenAddress).balanceOf(address(this));
+    }
+
     /**
      * @notice Gets a list of addresses that are ready to inject
      * @notice This is done by checking if the current period has ended, and should inject new funds directly after the end of each period.
@@ -132,7 +169,7 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
                 target.lastInjectionTimeStamp + minWaitPeriod <= block.timestamp &&
                 (period_finish <= block.timestamp) &&
                 balance >= target.amountPerPeriod &&
-                target.periodNumber < target.maxPeriods  &&
+                target.periodNumber < target.maxPeriods &&
                 gauge.reward_data(tokenAddress).distributor == address(this)
             ) {
                 ready[count] = gaugeList[idx];
@@ -172,16 +209,16 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
                 target.periodNumber < target.maxPeriods
             ) {
 
-                    SafeERC20.safeApprove(token,gaugeList[idx],target.amountPerPeriod);
+                SafeERC20.safeApprove(token, gaugeList[idx], target.amountPerPeriod);
 
-                    try gauge.deposit_reward_token(address(token), uint256(target.amountPerPeriod)) {
-                        s_targets[ready[idx]].lastInjectionTimeStamp = uint56(block.timestamp);
-                        s_targets[ready[idx]].periodNumber += 1;
-                        emit emissionsInjection(ready[idx], target.amountPerPeriod);
-                    } catch {
-                        emit injectionFailed(ready[idx]);
-                        revert("Failed to call deposit_reward_tokens");
-                    }
+                try gauge.deposit_reward_token(address(token), uint256(target.amountPerPeriod)) {
+                    s_targets[ready[idx]].lastInjectionTimeStamp = uint56(block.timestamp);
+                    s_targets[ready[idx]].periodNumber += 1;
+                    emit emissionsInjection(ready[idx], target.amountPerPeriod);
+                } catch {
+                    emit injectionFailed(ready[idx]);
+                    revert("Failed to call deposit_reward_tokens");
+                }
             }
         }
     }
@@ -238,6 +275,8 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         SafeERC20.safeTransfer(IERC20(token), owner(), balance);
     }
 
+
+
     /**
      * @notice Set distributor from the injector back to the owner.
      * @notice You will have to call set_reward_distributor back to the injector FROM the current distributor if you wish to continue using the injector
@@ -246,11 +285,11 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
    */
     function setDistributorToOwner(address gauge, address reward_token) external onlyOwner {
         IChildChainGauge gaugeContract = IChildChainGauge(gauge);
-        gaugeContract.set_reward_distributor(reward_token,owner());
+        gaugeContract.set_reward_distributor(reward_token, owner());
     }
 
-        /**
-     * @notice Manually deposit an amount of rewards to the gauge
+    /**
+ * @notice Manually deposit an amount of rewards to the gauge
      * @notice
    * @param gauge The Gauge to set distributor to injector owner
    * @param reward_token Reward token you are seeding
@@ -259,9 +298,9 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
     function manualDeposit(address gauge, address reward_token, uint256 amount) external onlyOwner {
         IChildChainGauge gaugeContract = IChildChainGauge(gauge);
         IERC20 token = IERC20(reward_token);
-        SafeERC20.safeApprove(token,gauge,amount);
+        SafeERC20.safeApprove(token, gauge, amount);
         gaugeContract.deposit_reward_token(reward_token, amount);
-        emit emissionsInjection(gauge,amount);
+        emit emissionsInjection(gauge, amount);
     }
 
     /**
