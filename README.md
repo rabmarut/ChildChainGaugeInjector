@@ -22,9 +22,9 @@ This contract is intended to operate as the distributor, and has functionality t
 
 The injector runs using a watch list.  The watch list is defined as the tuple of [gaugeAddress, amount, maxTopups].
 
-For every streamer address, assuming a sufficent token balance, the injector will top up the specified amounts until it has done so maxTopups time.
+For every streamer address, assuming a sufficent token balance, the injector will inject the specified amounts each epoch until it has done so maxTopups time.
 
-List changes are atomic.  A new list replaces an old once.
+List changes are atomic.  A new list replaces an old one.
 
 This list is defined by calling the function `setRecipientList(streamerAddresses, amountsPerPeriod, maxPeriods)` on the deployed injector.
 
