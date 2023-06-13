@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-
 pragma solidity 0.8.6;
 
 import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
@@ -8,7 +7,6 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "interfaces/balancer/IChildChainGauge.sol";
-
 
 /**
  * @title The ChildChainGaugeInjector Contract
@@ -21,8 +19,6 @@ import "interfaces/balancer/IChildChainGauge.sol";
  * @notice This contract is Ownable and has lots of sweep functionality to allow the owner to work with the contract or get tokens out should there be a problem.
  * see https://docs.chain.link/chainlink-automation/utility-contracts/
  */
-
-
 contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleInterface {
     event gasTokenWithdrawn(uint256 amountWithdrawn, address recipient);
     event KeeperRegistryAddressUpdated(address oldAddress, address newAddress);
@@ -32,7 +28,6 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
     event emissionsInjection(address gauge, uint256 amount);
     event forwardedCall(address targetContract);
     event setHandlingToken(address token);
-
 
     // events below here are debugging and should be removed
     event wrongCaller(address sender, address registry);
@@ -51,7 +46,6 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         uint56 lastInjectionTimeStamp; // enough space for 2 trillion years
     }
 
-
     address private s_keeperRegistryAddress;
     uint256 private s_minWaitPeriodSeconds;
     address[] private s_gaugeList;
@@ -59,45 +53,51 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
     address private s_injectTokenAddress;
 
     /**
-  * @param keeperRegistryAddress The address of the keeper registry contract
-   * @param minWaitPeriodSeconds The minimum wait period for address between funding (for security)
-   * @param injectTokenAddress The ERC20 token this contract should mange
-   */
-    constructor(address keeperRegistryAddress, uint256 minWaitPeriodSeconds, address injectTokenAddress)
-    ConfirmedOwner(msg.sender) {
+     * @param keeperRegistryAddress The address of the keeper registry contract
+     * @param minWaitPeriodSeconds The minimum wait period for address between funding (for security)
+     * @param injectTokenAddress The ERC20 token this contract should mange
+     */
+    constructor(
+        address keeperRegistryAddress,
+        uint256 minWaitPeriodSeconds,
+        address injectTokenAddress
+    ) ConfirmedOwner(msg.sender) {
         setKeeperRegistryAddress(keeperRegistryAddress);
         setMinWaitPeriodSeconds(minWaitPeriodSeconds);
         setInjectTokenAddress(injectTokenAddress);
     }
 
-
-
     /**
      * @notice Sets the list of addresses to watch and their funding parameters
-   * @param gaugeAddresses the list of addresses to watch
-   * @param amountsPerPeriod the minimum balances for each address
-   * @param maxPeriods the amount to top up each address
-   */
+     * @param gaugeAddresses the list of addresses to watch
+     * @param amountsPerPeriod the minimum balances for each address
+     * @param maxPeriods the amount to top up each address
+     */
     function setRecipientList(
         address[] calldata gaugeAddresses,
         uint256[] calldata amountsPerPeriod,
         uint8[] calldata maxPeriods
     ) public onlyOwner {
         if (gaugeAddresses.length != amountsPerPeriod.length || gaugeAddresses.length != maxPeriods.length) {
+            // @audit-issue-INFO Consider a more descriptive error; this is used three times.
             revert InvalidGaugeList();
         }
+
         address[] memory oldGaugeList = s_gaugeList;
         for (uint256 idx = 0; idx < oldGaugeList.length; idx++) {
             s_targets[oldGaugeList[idx]].isActive = false;
         }
+
         for (uint256 idx = 0; idx < gaugeAddresses.length; idx++) {
             if (s_targets[gaugeAddresses[idx]].isActive) {
                 revert DuplicateAddress(gaugeAddresses[idx]);
             }
             if (gaugeAddresses[idx] == address(0)) {
+                // @audit-issue-INFO Consider a more descriptive error; this is used three times.
                 revert InvalidGaugeList();
             }
             if (amountsPerPeriod[idx] == 0) {
+                // @audit-issue-INFO Consider a more descriptive error; this is used three times.
                 revert InvalidGaugeList();
             }
             s_targets[gaugeAddresses[idx]] = Target({
@@ -108,11 +108,12 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
                 periodNumber: 0
             });
         }
+
         s_gaugeList = gaugeAddresses;
     }
 
-
-    function setValidatedRecipientList(address[] calldata gaugeAddresses,
+    function setValidatedRecipientList(
+        address[] calldata gaugeAddresses,
         uint256[] calldata amountsPerPeriod,
         uint8[] calldata maxPeriods
     ) external onlyOwner {
@@ -120,19 +121,20 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         // validate all periods are finished
         for (uint256 idx = 0; idx < gaugeList.length; idx++) {
             Target memory target = s_targets[gaugeList[idx]];
+            // @audit-issue-MED Incorrect condition: if equal, then it is indeed finished. Should be `<`.
             if (target.periodNumber <= target.maxPeriods) {
                 revert("periods not finished");
             }
         }
+
         setRecipientList(gaugeAddresses, amountsPerPeriod, maxPeriods);
 
         if (!checkBalancesMatch()) {
             revert("balances don't match");
         }
-
     }
 
-    function checkBalancesMatch() public view returns (bool){
+    function checkBalancesMatch() public view returns (bool) {
         // iterates through all gauges to make sure theres enough tokens in the contract to fulfill all scheduled tasks
         // go through all gauges to see how many tokens are needed
         // maxperiods - periodnumber * amountPerPeriod ==  token.balanceOf(address(this))
@@ -141,16 +143,23 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         uint256 totalDue;
         for (uint256 idx = 0; idx < gaugeList.length; idx++) {
             Target memory target = s_targets[gaugeList[idx]];
+            // @audit-issue-LOW If this gauge's final period has been paid out, this will revert until we set a new list.
+            //                  It might be better to simply skip over this gauge in the interim.
+            // @audit-issue-INFO Can use `+=` here.
             totalDue = totalDue + (target.maxPeriods - target.periodNumber) * target.amountPerPeriod;
         }
+
+        // @audit-issue-MED It is not recommended to enforce that the amount matches exactly. This should be `<=` instead.
+        //                  If the contract has more than enough balance, the remainder can always be swept out later.
+        //                  If we enforce exact equality here, anyone can grief the contract by sending dust.
         return totalDue == IERC20(s_injectTokenAddress).balanceOf(address(this));
     }
 
     /**
      * @notice Gets a list of addresses that are ready to inject
      * @notice This is done by checking if the current period has ended, and should inject new funds directly after the end of each period.
-   * @return list of addresses that are ready to inject
-   */
+     * @return list of addresses that are ready to inject
+     */
     function getReadyGauges() public view returns (address[] memory) {
         address[] memory gaugeList = s_gaugeList;
         address[] memory ready = new address[](gaugeList.length);
@@ -159,6 +168,7 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         uint256 minWaitPeriod = s_minWaitPeriodSeconds;
         uint256 balance = IERC20(tokenAddress).balanceOf(address(this));
         Target memory target;
+
         for (uint256 idx = 0; idx < gaugeList.length; idx++) {
             target = s_targets[gaugeList[idx]];
             IChildChainGauge gauge = IChildChainGauge(gaugeList[idx]);
@@ -174,31 +184,42 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
             ) {
                 ready[count] = gaugeList[idx];
                 count++;
+                // @audit This function will revert if the total balance is not enough to cover all ready gauges.
+                //        Is that the desired behavior?
                 balance -= target.amountPerPeriod;
             }
         }
+
         if (count != gaugeList.length) {
+            // @audit-issue-INFO Add a comment explaining that this shrinks the array length.
             assembly {
                 mstore(ready, count)
             }
         }
+
         return ready;
     }
 
+    // @audit-issue-HIGH This function should NOT be publicly callable.
+    //                   It should be marked `internal` or `private` and invoked by the keeper via `performUpkeep`.
+    //                   If the owner also needs to call this function, then create a second `external onlyOwner` version.
     /**
      * @notice Injects funds into the gauges provided
-   * @param ready the list of gauges to fund (addresses must be pre-approved)
-   */
+     * @param ready the list of gauges to fund (addresses must be pre-approved)
+     */
     function injectFunds(address[] memory ready) public whenNotPaused {
         uint256 minWaitPeriodSeconds = s_minWaitPeriodSeconds;
         address tokenAddress = s_injectTokenAddress;
         IERC20 token = IERC20(tokenAddress);
+        // @audit-issue-INFO The gauges should not be read from storage here - we already have the list passed in as `ready`.
         address[] memory gaugeList = s_gaugeList;
         uint256 balance = token.balanceOf(address(this));
         Target memory target;
 
         for (uint256 idx = 0; idx < ready.length; idx++) {
+            // @audit-issue-HIGH Should validate `target.isActive` - `ready` might not be a subset of `s_gaugeList`.
             target = s_targets[ready[idx]];
+            // @audit-issue-HIGH Should be `ready` instead of `gaugeList`.
             IChildChainGauge gauge = IChildChainGauge(gaugeList[idx]);
             uint256 period_finish = gauge.reward_data(tokenAddress).period_finish;
 
@@ -208,7 +229,7 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
                 balance >= target.amountPerPeriod &&
                 target.periodNumber < target.maxPeriods
             ) {
-
+                // @audit-issue-HIGH Should be `ready` instead of `gaugeList`.
                 SafeERC20.safeApprove(token, gaugeList[idx], target.amountPerPeriod);
 
                 try gauge.deposit_reward_token(address(token), uint256(target.amountPerPeriod)) {
@@ -216,6 +237,7 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
                     s_targets[ready[idx]].periodNumber += 1;
                     emit emissionsInjection(ready[idx], target.amountPerPeriod);
                 } catch {
+                    // @audit-issue-INFO Not emitted since we revert. Consider using a custom error instead.
                     emit injectionFailed(ready[idx]);
                     revert("Failed to call deposit_reward_tokens");
                 }
@@ -223,18 +245,19 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         }
     }
 
+    // @audit-issue-INFO View function needn't revert while paused; consider returning `false` instead.
     /**
      * @notice Get list of addresses that are ready for new token injections and return keeper-compatible payload
-   * @param performData required by the chainlink interface but not used in this case.
-   * @return upkeepNeeded signals if upkeep is needed
-   * @return performData is an abi encoded list of addresses that need funds
-   */
+     * @param performData required by the chainlink interface but not used in this case.
+     * @return upkeepNeeded signals if upkeep is needed
+     * @return performData is an abi encoded list of addresses that need funds
+     */
     function checkUpkeep(bytes calldata)
-    external
-    view
-    override
-    whenNotPaused
-    returns (bool upkeepNeeded, bytes memory performData)
+        external
+        view
+        override
+        whenNotPaused
+        returns (bool upkeepNeeded, bytes memory performData)
     {
         address[] memory ready = getReadyGauges();
         upkeepNeeded = ready.length > 0;
@@ -242,20 +265,23 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         return (upkeepNeeded, performData);
     }
 
+    // @audit-issue-LOW Should check if upkeep needed as in `checkUpkeep` (Chainlink recommends: https://docs.chain.link/chainlink-automation/compatible-contracts)
     /**
      * @notice Called by keeper to send funds to underfunded addresses
-   * @param performData The abi encoded list of addresses to fund
-   */
+     * @param performData The abi encoded list of addresses to fund
+     */
     function performUpkeep(bytes calldata performData) external override onlyKeeperRegistry whenNotPaused {
         address[] memory needsFunding = abi.decode(performData, (address[]));
         emit performedUpkeep(needsFunding);
         injectFunds(needsFunding);
     }
 
+    // @audit-issue-INFO Consider allowing the owner to sweep to an arbitrary address instead of itself (could be a contract).
+    // @audit Why does this function withdraw a specific amount while `sweep` withdraws the full balance?
     /**
      * @notice Withdraws the contract balance
-   * @param amount The amount of eth (in wei) to withdraw
-   */
+     * @param amount The amount of eth (in wei) to withdraw
+     */
     function withdrawGasToken(uint256 amount) external onlyOwner {
         address payable recipient = payable(owner());
         if (recipient == address(0)) {
@@ -265,36 +291,37 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
         recipient.transfer(amount);
     }
 
+    // @audit-issue-INFO Consider allowing the owner to sweep to an arbitrary address instead of itself (could be a contract).
+    // @audit Why does this function withdraw the full balance while `withdrawGasToken` withdraws a specific amount?
     /**
      * @notice Sweep the full contract's balance for a given ERC-20 token
-   * @param token The ERC-20 token which needs to be swept
-   */
+     * @param token The ERC-20 token which needs to be swept
+     */
     function sweep(address token) external onlyOwner {
         uint256 balance = IERC20(token).balanceOf(address(this));
         emit ERC20Swept(token, owner(), balance);
         SafeERC20.safeTransfer(IERC20(token), owner(), balance);
     }
 
-
-
+    // @audit If this contract is only meant to manage a single token, why have a token param here?
     /**
      * @notice Set distributor from the injector back to the owner.
      * @notice You will have to call set_reward_distributor back to the injector FROM the current distributor if you wish to continue using the injector
-   * @param gauge The Gauge to set distributor to injector owner
-   * @param reward_token Reward token you are setting distributor for
-   */
+     * @param gauge The Gauge to set distributor to injector owner
+     * @param reward_token Reward token you are setting distributor for
+     */
     function setDistributorToOwner(address gauge, address reward_token) external onlyOwner {
         IChildChainGauge gaugeContract = IChildChainGauge(gauge);
         gaugeContract.set_reward_distributor(reward_token, owner());
     }
 
+    // @audit If this contract is only meant to manage a single token, why have a token param here?
     /**
- * @notice Manually deposit an amount of rewards to the gauge
-     * @notice
-   * @param gauge The Gauge to set distributor to injector owner
-   * @param reward_token Reward token you are seeding
-   * @param amount Amount to deposit
-   */
+     * @notice Manually deposit an amount of rewards to the gauge
+     * @param gauge The Gauge to set distributor to injector owner
+     * @param reward_token Reward token you are seeding
+     * @param amount Amount to deposit
+     */
     function manualDeposit(address gauge, address reward_token, uint256 amount) external onlyOwner {
         IChildChainGauge gaugeContract = IChildChainGauge(gauge);
         IERC20 token = IERC20(reward_token);
@@ -305,7 +332,7 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
 
     /**
      * @notice Sets the keeper registry address
-   */
+     */
     function setKeeperRegistryAddress(address keeperRegistryAddress) public onlyOwner {
         emit KeeperRegistryAddressUpdated(s_keeperRegistryAddress, keeperRegistryAddress);
         s_keeperRegistryAddress = keeperRegistryAddress;
@@ -313,7 +340,7 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
 
     /**
      * @notice Sets the minimum wait period (in seconds) for addresses between injections
-   */
+     */
     function setMinWaitPeriodSeconds(uint256 period) public onlyOwner {
         emit MinWaitPeriodUpdated(s_minWaitPeriodSeconds, period);
         s_minWaitPeriodSeconds = period;
@@ -321,52 +348,53 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
 
     /**
      * @notice Gets the keeper registry address
-   */
+     */
     function getKeeperRegistryAddress() external view returns (address keeperRegistryAddress) {
         return s_keeperRegistryAddress;
     }
 
     /**
      * @notice Gets the minimum wait period
-   */
+     */
     function getMinWaitPeriodSeconds() external view returns (uint256) {
         return s_minWaitPeriodSeconds;
     }
 
     /**
      * @notice Gets the list of addresses on the in the current configuration.
-   */
+     */
     function getWatchList() external view returns (address[] memory) {
         return s_gaugeList;
     }
 
     /**
      * @notice Sets the address of the ERC20 token this contract should handle
-   */
+     */
     function setInjectTokenAddress(address ERC20token) public onlyOwner {
         emit setHandlingToken(ERC20token);
         s_injectTokenAddress = ERC20token;
-
     }
+
     /**
      * @notice Gets the token this injector is operating on
-   */
-    function getInjectTokenAddress() external view returns (address ERC20token){
+     */
+    function getInjectTokenAddress() external view returns (address ERC20token) {
         return s_injectTokenAddress;
     }
+
     /**
      * @notice Gets configuration information for an address on the gaugelist
-   */
+     */
     function getAccountInfo(address targetAddress)
-    external
-    view
-    returns (
-        bool isActive,
-        uint256 amountPerPeriod,
-        uint8 maxPeriods,
-        uint8 periodNumber,
-        uint56 lastInjectionTimeStamp
-    )
+        external
+        view
+        returns (
+            bool isActive,
+            uint256 amountPerPeriod,
+            uint8 maxPeriods,
+            uint8 periodNumber,
+            uint56 lastInjectionTimeStamp
+        )
     {
         Target memory target = s_targets[targetAddress];
         return (target.isActive, target.amountPerPeriod, target.maxPeriods, target.periodNumber, target.lastInjectionTimeStamp);
@@ -374,20 +402,21 @@ contract ChildChainGaugeInjector is ConfirmedOwner, Pausable, KeeperCompatibleIn
 
     /**
      * @notice Pauses the contract, which prevents executing performUpkeep
-   */
+     */
     function pause() external onlyOwner {
         _pause();
     }
 
     /**
      * @notice Unpauses the contract
-   */
+     */
     function unpause() external onlyOwner {
         _unpause();
     }
 
     modifier onlyKeeperRegistry() {
         if (msg.sender != s_keeperRegistryAddress) {
+            // @audit-issue-INFO Not emitted since we revert.
             emit wrongCaller(msg.sender, s_keeperRegistryAddress);
             revert OnlyKeeperRegistry(msg.sender);
         }
